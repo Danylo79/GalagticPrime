@@ -1,89 +1,117 @@
 package dev.dankom.gp;
 
-import dev.dankom.gp.exception.GPException;
-import dev.dankom.gp.input.Input;
+import org.lwjgl.Version;
+import org.lwjgl.glfw.GLFWErrorCallback;
 import org.lwjgl.glfw.GLFWVidMode;
 import org.lwjgl.opengl.GL;
+import org.lwjgl.system.MemoryStack;
 
+import java.nio.IntBuffer;
+
+import static org.lwjgl.glfw.Callbacks.glfwFreeCallbacks;
 import static org.lwjgl.glfw.GLFW.*;
 import static org.lwjgl.opengl.GL11.*;
+import static org.lwjgl.system.MemoryStack.stackPush;
 import static org.lwjgl.system.MemoryUtil.NULL;
 
 public class Game implements Runnable {
 
-    private final String NAME = "Galactic Prime", VERSION = "B1", AUTHOR = "Dankom";
-
-    private final int width = 1280;
-    private final int height = 720;
-
-    private Thread thread;
-    private boolean running = false;
-
+    // The window handle
     private long window;
 
-    public synchronized void start() {
-        running = true;
-        thread = new Thread(this, "Game");
-        thread.start();
-    }
-
-    @Override
     public void run() {
-        init();
-        while (running) {
-            update();
-            render();
+        System.out.println("Hello LWJGL " + Version.getVersion() + "!");
 
-            if (glfwWindowShouldClose(window)) {
-                running = false;
-            }
-        }
+        init();
+        loop();
+
+        // Free the window callbacks and destroy the window
+        glfwFreeCallbacks(window);
+        glfwDestroyWindow(window);
+
+        // Terminate GLFW and free the error callback
+        glfwTerminate();
+        glfwSetErrorCallback(null).free();
     }
 
     private void init() {
-        if (!glfwInit()) {
-            try {
-                throw new GPException("Failed to init GLFW", getClass());
-            } catch (GPException e) {
-                e.printStackTrace();
-            }
-        }
+        // Setup an error callback. The default implementation
+        // will print the error message in System.err.
+        GLFWErrorCallback.createPrint(System.err).set();
 
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-        window = glfwCreateWindow(width, height, NAME + " (" + VERSION + ")", glfwGetPrimaryMonitor(), GLFW_FALSE);
-        if (window == NULL) {
-            try {
-                throw new GPException("Could not create window", getClass());
-            } catch (GPException e) {
-                e.printStackTrace();
-            }
-        }
-        GLFWVidMode vidMode = glfwGetVideoMode(glfwGetPrimaryMonitor());
-        glfwSetWindowPos(window, (int) ((vidMode.width() - window) / 2), (int) ((vidMode.height() - window) / 2));
+        // Initialize GLFW. Most GLFW functions will not work before doing this.
+        if ( !glfwInit() )
+            throw new IllegalStateException("Unable to initialize GLFW");
 
-        glfwSetKeyCallback(window, new Input());
+        // Configure GLFW
+        glfwDefaultWindowHints(); // optional, the current window hints are already the default
+        glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE); // the window will stay hidden after creation
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE); // the window will be resizable
 
+        // Create the window
+        window = glfwCreateWindow(300, 300, "Hello World!", NULL, NULL);
+        if ( window == NULL )
+            throw new RuntimeException("Failed to create the GLFW window");
+
+        // Setup a key callback. It will be called every time a key is pressed, repeated or released.
+        glfwSetKeyCallback(window, (window, key, scancode, action, mods) -> {
+            if ( key == GLFW_KEY_ESCAPE && action == GLFW_RELEASE )
+                glfwSetWindowShouldClose(window, true); // We will detect this in the rendering loop
+        });
+
+        // Get the thread stack and push a new frame
+        try ( MemoryStack stack = stackPush() ) {
+            IntBuffer pWidth = stack.mallocInt(1); // int*
+            IntBuffer pHeight = stack.mallocInt(1); // int*
+
+            // Get the window size passed to glfwCreateWindow
+            glfwGetWindowSize(window, pWidth, pHeight);
+
+            // Get the resolution of the primary monitor
+            GLFWVidMode vidmode = glfwGetVideoMode(glfwGetPrimaryMonitor());
+
+            // Center the window
+            glfwSetWindowPos(
+                    window,
+                    (vidmode.width() - pWidth.get(0)) / 2,
+                    (vidmode.height() - pHeight.get(0)) / 2
+            );
+        } // the stack frame is popped automatically
+
+        // Make the OpenGL context current
         glfwMakeContextCurrent(window);
-        glfwShowWindow(window);
+        // Enable v-sync
+        glfwSwapInterval(1);
 
+        // Make the window visible
+        glfwShowWindow(window);
+    }
+
+    private void loop() {
+        // This line is critical for LWJGL's interoperation with GLFW's
+        // OpenGL context, or any context that is managed externally.
+        // LWJGL detects the context that is current in the current thread,
+        // creates the GLCapabilities instance and makes the OpenGL
+        // bindings available for use.
         GL.createCapabilities();
 
-        glClearColor(1.0f, 0.0f, 1.0f, 1.0f);
-        glEnable(GL_DEPTH_TEST);
-        System.out.println("OpenGL: " + glGetString(GL_VERSION));
-    }
+        // Set the clear color
+        glClearColor(1.0f, 0.0f, 0.0f, 0.0f);
 
-    private void update() {
-        glfwPollEvents();
-    }
+        // Run the rendering loop until the user has attempted to close
+        // the window or has pressed the ESCAPE key.
+        while ( !glfwWindowShouldClose(window) ) {
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); // clear the framebuffer
 
-    private void render() {
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        glfwSwapBuffers(window);
+            glfwSwapBuffers(window); // swap the color buffers
+
+            // Poll for window events. The key callback above will only be
+            // invoked during this call.
+            glfwPollEvents();
+        }
     }
 
     public static void main(String[] args) {
-        Game g = new Game();
-        g.start();
+        new Game().run();
     }
 }
